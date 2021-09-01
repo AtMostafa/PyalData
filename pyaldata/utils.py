@@ -60,7 +60,7 @@ def mat2dataframe(path, shift_idx_fields, td_name=None):
 
     df = pd.DataFrame(mat[td_name])
 
-    df = clean_0d_array_fields(df)
+    #df = clean_0d_array_fields(df)
     df = clean_integer_fields(df)
 
     if shift_idx_fields:
