@@ -5,6 +5,7 @@ import pandas as pd
 from scipy.stats import norm
 import scipy.io
 import scipy.signal as scs
+from scipy.ndimage import convolve1d
 
 from sklearn.decomposition import PCA
 from sklearn.decomposition import FactorAnalysis
@@ -59,6 +60,9 @@ def mat2dataframe(path, shift_idx_fields, td_name=None):
 
     df = pd.DataFrame(mat[td_name])
 
+    df = clean_0d_array_fields(df)
+    df = clean_integer_fields(df)
+
     if shift_idx_fields:
         df = backshift_idx_fields(df)
 
@@ -81,10 +85,10 @@ def norm_gauss_window(bin_length, std):
     -------
     win : 1D np.array
         Gaussian kernel with
-            length: 5*std/bin_length
+            length: 10*std/bin_length
             mass normalized to 1
     """
-    win = scs.gaussian(int(5*std/bin_length), std/bin_length)
+    win = scs.gaussian(int(10*std/bin_length), std/bin_length)
     return win / np.sum(win)
 
 
@@ -93,24 +97,6 @@ def hw_to_std(hw):
     Convert half-width to standard deviation for a Gaussian window.
     """
     return hw / (2 * np.sqrt(2 * np.log(2)))
-
-
-def _smooth_1d(arr, win):
-    """
-    Smooth a 1D array by convolving it with a window
-
-    Parameters
-    ----------
-    arr : 1D array-like
-        time-series to smooth
-    win : 1D array-like
-        smoothing window to convolve with
-
-    Returns
-    -------
-    1D np.array of the same length as arr
-    """
-    return scs.convolve(arr, win, mode = "same")
 
 
 def smooth_data(mat, dt=None, std=None, hw=None, win=None):
@@ -145,10 +131,8 @@ def smooth_data(mat, dt=None, std=None, hw=None, win=None):
 
         win = norm_gauss_window(dt, std)
 
-    if mat.ndim == 1:
-        return _smooth_1d(mat, win)
-    elif mat.ndim == 2:
-        return np.column_stack([_smooth_1d(mat[:, i], win) for i in range(mat.shape[1])])
+    if mat.ndim == 1 or mat.ndim == 2:
+        return convolve1d(mat, win, axis=0, output=np.float32, mode='reflect')
     else:
         raise ValueError("mat has to be a 1D or 2D array")
 
@@ -716,3 +700,62 @@ def _slice_in_trial(trial, epoch_fun, start_point_name=None, end_point_name=None
             warnings.warn(f"Invalid time index on trial with ID {trial.trial_id}. End point is {sl.stop}")
 
     return is_inside
+
+
+@copy_td
+def clean_0d_array_fields(df):
+    """
+    Loading v7.3 MAT files, sometimes scalers are stored as 0-dimensional arrays for some reason.
+    This converts those back to scalars.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        data in trial_data format
+
+    Returns
+    -------
+    a copy of df with the relevant fields changed
+    """
+    for c in df.columns:
+        if isinstance(df[c].values[0], np.ndarray):
+            if all([arr.ndim == 0 for arr in df[c]]):
+                df[c] = [arr.item() for arr in df[c]]
+
+    return df
+
+
+@copy_td
+def clean_integer_fields(df):
+    """
+    Modify fields that store integers as floats to store them as integers instead.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        data in trial_data format
+
+    Returns
+    -------
+    a copy of df with the relevant fields changed
+    """
+    for field in df.columns:
+        if isinstance(df[field].values[0], np.ndarray):
+            try:
+                int_arrays = [np.int32(arr) for arr in df[field]]
+            except:
+                print(f"array field {field} could not be converted to int.")
+            else:
+                if all([np.allclose(int_arr, arr) for (int_arr, arr) in zip(int_arrays, df[field])]):
+                    df[field] = int_arrays
+        else:
+            if not isinstance(df[field].values[0], str):
+                try:
+                    int_version = np.int32(df[field])
+                except:
+                        print(f"field {field} could not be converted to int.")
+                else:
+                    if np.allclose(int_version, df[field]):
+                        df[field] = int_version
+
+    return df
