@@ -140,7 +140,10 @@ def add_gradient(trial_data, signal, outfield=None, normalize=False):
     trial_data[outfield] = [np.gradient(s, axis=0) for s in trial_data[signal]]
 
     if normalize:
-        trial_data[outfield] = trial_data[outfield] / trial_data.bin_size
+        bin_size = trial_data.bin_size.values[0]
+        assert all(trial_data.bin_size.values == bin_size)
+
+        trial_data[outfield] = trial_data[outfield] / bin_size
 
     return trial_data
 
@@ -600,13 +603,9 @@ def restrict_to_interval(trial_data, start_point_name=None, end_point_name=None,
     idx_fields = [col for col in trial_data.columns.values if col.startswith("idx")]
     time_fields = utils.get_time_varying_fields(trial_data, ref_field)
 
-
-    # extract given interval from the time-varying fields
+    # generate epoch_fun if the interval is given with time points
     if start_point_name is not None:
-        if end_point_name is None:
-            epoch_fun = lambda trial: utils.slice_around_point(trial, start_point_name, -rel_start, rel_end)
-        else:
-            epoch_fun = lambda trial: utils.slice_between_points(trial, start_point_name, end_point_name, -rel_start, rel_end)
+        epoch_fun = utils.generate_epoch_fun(start_point_name, end_point_name, rel_start, rel_end)
 
     # check in which trials the indexing works properly
     kept_trials_mask = np.array([utils._slice_in_trial(trial, epoch_fun,
@@ -994,7 +993,8 @@ def remove_low_firing_neurons(trial_data, signal, threshold, divide_by_bin_size=
     area_name = utils.remove_suffix(signal, suffix)
     unit_guide = area_name + "_unit_guide"
 
-    trial_data[unit_guide] = [arr[mask, :] for arr in trial_data[unit_guide]]
+    if unit_guide in trial_data.columns:
+        trial_data[unit_guide] = [arr[mask, :] for arr in trial_data[unit_guide]]
 
     if verbose:
         print(f"Removed {np.sum(~mask)} neurons from {signal}.")
@@ -1073,3 +1073,24 @@ def keep_common_trials(df_a, df_b, join_field='trial_id'):
     subset_b = select_trials(df_b, lambda trial: trial[join_field] in common_ids)
     
     return subset_a, subset_b
+
+
+def stack_time_average(trial_data, signal):
+    """
+    Average signal in time in each trial, then stack them into an
+    n_trials x n_features array
+
+    Parameters
+    ----------
+    trial_data : pd.DataFrame
+        data in trial_data format
+    signal : str
+        signal to work on
+
+    Returns
+    -------
+    X : 2D np.array
+        n_trials x n_features array in which every row is
+        the time-averaged signal in a trial
+    """
+    return np.stack([np.mean(arr, axis=0) for arr in trial_data[signal]])
