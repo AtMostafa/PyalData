@@ -59,9 +59,12 @@ def mat2dataframe(path, shift_idx_fields, td_name=None):
         td_name = real_keys[0]
 
     df = pd.DataFrame(mat[td_name])
-
-    #df = clean_0d_array_fields(df)
-    df = clean_integer_fields(df)
+    try:
+        df = clean_0d_array_fields(df)
+    except: pass
+    try:
+        df = clean_integer_fields(df)
+    except: pass
 
     if shift_idx_fields:
         df = backshift_idx_fields(df)
